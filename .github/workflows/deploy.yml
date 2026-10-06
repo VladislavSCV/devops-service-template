@@ -1,0 +1,74 @@
+# Manual deploy to a server over SSH.
+#
+# Required repository secrets:
+#   SSH_HOST         server address
+#   SSH_USER         user allowed to run docker (member of the `docker` group)
+#   SSH_KEY          private key (the public key is in ~/.ssh/authorized_keys of SSH_USER)
+# Optional:
+#   SSH_PORT         default 22
+#   SSH_KNOWN_HOSTS  output of `ssh-keyscan -H <host>`; strongly recommended, otherwise the
+#                    host key is trusted on first use
+#   DEPLOY_PATH      directory with docker-compose.yml and .env on the server (default ~/app)
+#
+# On the server, .env must contain APP_IMAGE=ghcr.io/<owner>/<repo>. For a private package,
+# run `docker login ghcr.io` there once with a token that has read:packages.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (latest, sha-xxxxxxx, 1.2.3)"
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Pull and restart
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '~/app' }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "set -e; cd $DEPLOY_PATH; export APP_TAG='$TAG'; \
+             docker compose -p devops-template pull app && \
+             docker compose -p devops-template up -d --remove-orphans && \
+             docker compose -p devops-template ps"
+
+      - name: Smoke test
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            'for i in $(seq 1 30); do curl -fsS http://localhost/ready && exit 0; sleep 2; done; exit 1'

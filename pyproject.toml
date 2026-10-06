@@ -1,0 +1,37 @@
+[project]
+name = "devops-service-template"
+version = "1.0.0"
+description = "FastAPI service with production-ready Docker, monitoring, alerts, backups and CI/CD"
+requires-python = ">=3.12"
+license = "MIT"
+# Runtime dependencies are pinned in requirements.txt, dev tools in requirements-dev.txt.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+    "BLE",     # blind except
+    "S",       # bandit (security)
+    "RUF",
+]
+ignore = [
+    "B008",    # FastAPI uses calls in defaults (Depends/Query)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is fine in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
